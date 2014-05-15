@@ -5,7 +5,6 @@ import (
 	"github.com/strava/go.strava"
 	"net/http"
 	// "os/exec"
-	"encoding/json"
 	"os"
 )
 
@@ -40,13 +39,33 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func oAuthSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "SUCCESS:\nAt this point you can use this information to create a new user or link the account to one of your existing users\n")
-	fmt.Fprintf(w, "State: %s\n\n", auth.State)
-	fmt.Fprintf(w, "Access Token: %s\n\n", auth.AccessToken)
+	fmt.Fprintf(w, "<h1>Authorization Successful!</h1>")
 
-	fmt.Fprintf(w, "The Authenticated Athlete (you):\n")
-	content, _ := json.MarshalIndent(auth.Athlete, "", " ")
-	fmt.Fprint(w, string(content))
+	client := strava.NewClient(auth.AccessToken)
+	athletesService := strava.NewAthletesService(client)
+	activitiesService := strava.NewActivitiesService(client)
+	segmentService := strava.NewSegmentsService(client)
+
+	athleteId := auth.Athlete.Id
+	activities, err := athletesService.ListActivities(athleteId).Page(1).PerPage(1).Do()
+	if err != nil {
+		panic(err)
+	}
+
+	detail, err := activitiesService.Get(activities[0].Id).IncludeAllEfforts().Do()
+	if err != nil {
+		panic(err)
+	}
+
+	for _, effort := range detail.SegmentEfforts {
+		elapsedTime := effort.ElapsedTime
+		segment, err := segmentService.Get(int(effort.Segment.Id)).Do()
+		if err != nil {
+			panic(err)
+		}
+		prTime := segment.PRTime
+		fmt.Println(prTime, elapsedTime)
+	}
 }
 
 func oAuthFailure(err error, w http.ResponseWriter, r *http.Request) {
