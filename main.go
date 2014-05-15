@@ -3,56 +3,55 @@ package main
 import (
 	"fmt"
 	"github.com/strava/go.strava"
+	"html/template"
 	"net/http"
-	// "os/exec"
 	"os"
+	"os/exec"
+	"strconv"
 )
 
-func main() {
-	PORT := 8080
+var PORT int = 8080
+var client *strava.Client
+var athlete strava.AthleteDetailed
+var templates = template.Must(template.ParseFiles("input.html"))
 
+func main() {
 	strava.ClientId = 734
 	strava.ClientSecret = "d199bb61472903a73a7b6c4f70b3cc789b3bb3f9"
-	strava.OAuthCallbackURL = fmt.Sprintf("http://localhost:%d/exchange", PORT)
 
-	path, err := strava.OAuthCallbackPath()
+	http.HandleFunc("/", homeHandler)
+	http.HandleFunc("/results/", resultsHandler)
+
+	err := exec.Command("explorer", fmt.Sprintf("http://localhost:%d", PORT)).Start()
 	if err != nil {
-		fmt.Printf("Can't set authorization callback URL.\n%s\n", err)
-		os.Exit(1)
+		fmt.Printf("Please visit http://localhost:%d\n", PORT)
 	}
-
-	// The exec command doesn't work at the moment.
-	// authURL := strava.OAuthAuthorizationURL("", strava.Permissions.Public, true)
-	// fmt.Println(fmt.Sprintf("\"%s\"", authURL))
-	// err = exec.Command("explorer", fmt.Sprintf("\"%s\"", authURL)).Start()
-	// if err != nil {
-	http.HandleFunc("/", indexHandler)
-	fmt.Println("Please visit http://localhost:8080 for authorization.")
-	// }
-
-	http.HandleFunc(path, strava.OAuthCallbackHandler(oAuthSuccess, oAuthFailure))
 	http.ListenAndServe(fmt.Sprintf(":%d", PORT), nil)
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, strava.OAuthAuthorizationURL("", strava.Permissions.Public, true), http.StatusFound)
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	checkAuth(w, r)
+	renderTemplate("input.html", w)
 }
 
-func oAuthSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<h1>Authorization Successful!</h1>")
+func resultsHandler(w http.ResponseWriter, r *http.Request) {
+	checkAuth(w, r)
 
-	client := strava.NewClient(auth.AccessToken)
-	athletesService := strava.NewAthletesService(client)
 	activitiesService := strava.NewActivitiesService(client)
 	segmentService := strava.NewSegmentsService(client)
 
-	athleteId := auth.Athlete.Id
-	activities, err := athletesService.ListActivities(athleteId).Page(1).PerPage(1).Do()
+	activityId, err := strconv.ParseInt(r.FormValue("activity_id"), 0, 64)
 	if err != nil {
-		panic(err)
+		// Retrieve last activity
+		athletesService := strava.NewAthletesService(client)
+		activities, err := athletesService.ListActivities(athlete.Id).Page(1).PerPage(1).Do()
+		if err != nil {
+			panic(err)
+		}
+		activityId = activities[0].Id
 	}
 
-	detail, err := activitiesService.Get(activities[0].Id).IncludeAllEfforts().Do()
+	detail, err := activitiesService.Get(activityId).IncludeAllEfforts().Do()
 	if err != nil {
 		panic(err)
 	}
@@ -68,6 +67,33 @@ func oAuthSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *
 	}
 }
 
-func oAuthFailure(err error, w http.ResponseWriter, r *http.Request) {
+func checkAuth(w http.ResponseWriter, r *http.Request) {
+	if client == nil {
+		strava.OAuthCallbackURL = fmt.Sprintf("http://localhost:%d/auth/", PORT)
+		path, err := strava.OAuthCallbackPath()
+		if err != nil {
+			fmt.Printf("Can't set authorization callback URL.\n%s\n", err)
+			os.Exit(1)
+		}
+		http.HandleFunc(path, strava.OAuthCallbackHandler(authSuccess, authFailure))
+		http.Redirect(w, r, strava.OAuthAuthorizationURL("", strava.Permissions.Public, true), http.StatusFound)
+	}
+}
+
+func authSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *http.Request) {
+	client = strava.NewClient(auth.AccessToken)
+	athlete = auth.Athlete
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func authFailure(err error, w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<h1>Authorization Unsuccessful</h1><div>Why? %s</div>", err)
+}
+
+func renderTemplate(filename string, w http.ResponseWriter) {
+	err := templates.ExecuteTemplate(w, filename, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
