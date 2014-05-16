@@ -7,13 +7,21 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 )
 
 var PORT int = 8080
 var client *strava.Client
 var athlete strava.AthleteDetailed
-var templates = template.Must(template.ParseFiles("input.html"))
+var templates = template.Must(template.ParseFiles("input.html", "results.html"))
+
+type SegmentInfo struct {
+	Name        string
+	PRTime      int
+	ElapsedTime int
+	Percentage  int
+}
 
 func main() {
 	strava.ClientId = 734
@@ -22,7 +30,11 @@ func main() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/results/", resultsHandler)
 
-	err := exec.Command("explorer", fmt.Sprintf("http://localhost:%d", PORT)).Start()
+	cmd := "open"
+	if runtime.GOOS == "windows" {
+		cmd = "explorer"
+	}
+	err := exec.Command(cmd, fmt.Sprintf("http://localhost:%d", PORT)).Start()
 	if err != nil {
 		fmt.Printf("Please visit http://localhost:%d\n", PORT)
 	}
@@ -31,7 +43,7 @@ func main() {
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	checkAuth(w, r)
-	renderTemplate("input.html", w)
+	renderTemplate("input.html", w, nil)
 }
 
 func resultsHandler(w http.ResponseWriter, r *http.Request) {
@@ -56,15 +68,23 @@ func resultsHandler(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	for _, effort := range detail.SegmentEfforts {
+	data := make([]SegmentInfo, len(detail.SegmentEfforts))
+
+	for i, effort := range detail.SegmentEfforts {
 		elapsedTime := effort.ElapsedTime
 		segment, err := segmentService.Get(int(effort.Segment.Id)).Do()
 		if err != nil {
 			panic(err)
 		}
 		prTime := segment.PRTime
-		fmt.Println(prTime, elapsedTime)
+
+		data[i].Name = effort.Name
+		data[i].PRTime = prTime
+		data[i].ElapsedTime = elapsedTime
+		data[i].Percentage = int(float32(elapsedTime) / float32(prTime) * 100)
 	}
+
+	renderTemplate("results.html", w, data)
 }
 
 func checkAuth(w http.ResponseWriter, r *http.Request) {
@@ -90,8 +110,8 @@ func authFailure(err error, w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<h1>Authorization Unsuccessful</h1><div>Why? %s</div>", err)
 }
 
-func renderTemplate(filename string, w http.ResponseWriter) {
-	err := templates.ExecuteTemplate(w, filename, nil)
+func renderTemplate(filename string, w http.ResponseWriter, data interface{}) {
+	err := templates.ExecuteTemplate(w, filename, data)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

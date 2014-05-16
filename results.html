@@ -3,5 +3,13 @@
     <head>
     </head>
     <body>
+    <table>
+    <tr><td>Segment</td><td>Your PR /s</td><td>Current Time /s</td><td>% of PR</td></tr>
+    {{range .}}
+    <tr>
+        <td>{{.Name}}</td> <td>{{.PRTime}}</td> <td>{{.ElapsedTime}}</td> <td>{{.Percentage}}</td>
+    </tr>
+    {{end}}
+    </table>
     </body>
 </html>
