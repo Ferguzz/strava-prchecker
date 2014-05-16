@@ -16,7 +16,7 @@ import (
 var PORT int = 8080
 var client *strava.Client
 var athlete strava.AthleteDetailed
-var templates = template.Must(template.ParseFiles("input.html", "results.html"))
+var templates = template.Must(template.ParseFiles("html/input.html", "html/results.html"))
 
 type SegmentInfo struct {
 	Name        string
