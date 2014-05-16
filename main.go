@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/strava/go.strava"
 	"html/template"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,9 +25,28 @@ type SegmentInfo struct {
 	Percentage  int
 }
 
+type AppConfig struct {
+	ClientID     int
+	ClientSecret string
+}
+
 func main() {
-	strava.ClientId = 734
-	strava.ClientSecret = "d199bb61472903a73a7b6c4f70b3cc789b3bb3f9"
+	configFile := "appconfig.json"
+	configData, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		fmt.Printf("Can't open configuration file: %s\n", configFile)
+		os.Exit(1)
+	}
+
+	var config AppConfig
+	err = json.Unmarshal(configData, &config)
+	if err != nil {
+		fmt.Println("Can't parse configuration file.")
+		os.Exit(1)
+	}
+
+	strava.ClientId = config.ClientID
+	strava.ClientSecret = config.ClientSecret
 
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/results/", resultsHandler)
@@ -34,7 +55,7 @@ func main() {
 	if runtime.GOOS == "windows" {
 		cmd = "explorer"
 	}
-	err := exec.Command(cmd, fmt.Sprintf("http://localhost:%d", PORT)).Start()
+	err = exec.Command(cmd, fmt.Sprintf("http://localhost:%d", PORT)).Start()
 	if err != nil {
 		fmt.Printf("Please visit http://localhost:%d\n", PORT)
 	}
@@ -96,7 +117,7 @@ func checkAuth(w http.ResponseWriter, r *http.Request) {
 			os.Exit(1)
 		}
 		http.HandleFunc(path, strava.OAuthCallbackHandler(authSuccess, authFailure))
-		http.Redirect(w, r, strava.OAuthAuthorizationURL("", strava.Permissions.Public, true), http.StatusFound)
+		http.Redirect(w, r, strava.OAuthAuthorizationURL("", strava.Permissions.Public, false), http.StatusFound)
 	}
 }
 
@@ -107,7 +128,7 @@ func authSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *h
 }
 
 func authFailure(err error, w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<h1>Authorization Unsuccessful</h1><div>Why? %s</div>", err)
+	fmt.Fprintf(w, "<h1>Authorization Unsuccessful</h1><div>%s</div>", err)
 }
 
 func renderTemplate(filename string, w http.ResponseWriter, data interface{}) {
