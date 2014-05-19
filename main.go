@@ -1,6 +1,7 @@
 package main
 
 import (
+	"appengine"
 	"encoding/json"
 	"fmt"
 	"github.com/strava/go.strava"
@@ -8,13 +9,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 )
 
 var PORT int = 8080
-var client *strava.Client
+var accessToken string
 var athlete strava.AthleteDetailed
 var templates = template.Must(template.ParseFiles("html/input.html", "html/results.html"))
 
@@ -30,7 +29,7 @@ type AppConfig struct {
 	ClientSecret string
 }
 
-func main() {
+func init() {
 	configFile := "appconfig.json"
 	configData, err := ioutil.ReadFile(configFile)
 	if err != nil {
@@ -50,16 +49,6 @@ func main() {
 
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/results/", resultsHandler)
-
-	cmd := "open"
-	if runtime.GOOS == "windows" {
-		cmd = "explorer"
-	}
-	err = exec.Command(cmd, fmt.Sprintf("http://localhost:%d", PORT)).Start()
-	if err != nil {
-		fmt.Printf("Please visit http://localhost:%d\n", PORT)
-	}
-	http.ListenAndServe(fmt.Sprintf(":%d", PORT), nil)
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -70,8 +59,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 func resultsHandler(w http.ResponseWriter, r *http.Request) {
 	checkAuth(w, r)
 
-	activitiesService := strava.NewActivitiesService(client)
-	segmentService := strava.NewSegmentsService(client)
+	c := appengine.NewContext(r)
+	client := strava.NewClient(accessToken)
 
 	activityId, err := strconv.ParseInt(r.FormValue("activity_id"), 0, 64)
 	if err != nil {
@@ -79,23 +68,28 @@ func resultsHandler(w http.ResponseWriter, r *http.Request) {
 		athletesService := strava.NewAthletesService(client)
 		activities, err := athletesService.ListActivities(athlete.Id).Page(1).PerPage(1).Do()
 		if err != nil {
-			panic(err)
+			c.Infof("Can't get requested activity: %s", err)
+			os.Exit(1)
 		}
 		activityId = activities[0].Id
 	}
 
+	activitiesService := strava.NewActivitiesService(client)
 	detail, err := activitiesService.Get(activityId).IncludeAllEfforts().Do()
 	if err != nil {
-		panic(err)
+		c.Infof("Can't get segment efforts for requested activity: %s", err)
+		os.Exit(1)
 	}
 
 	data := make([]SegmentInfo, len(detail.SegmentEfforts))
+	segmentService := strava.NewSegmentsService(client)
 
 	for i, effort := range detail.SegmentEfforts {
 		elapsedTime := effort.ElapsedTime
 		segment, err := segmentService.Get(int(effort.Segment.Id)).Do()
 		if err != nil {
-			panic(err)
+			c.Infof("Can't get segment detail for requested activity: %s", err)
+			os.Exit(1)
 		}
 		prTime := segment.PRTime
 
@@ -109,11 +103,12 @@ func resultsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func checkAuth(w http.ResponseWriter, r *http.Request) {
-	if client == nil {
+	if accessToken == "" {
+		c := appengine.NewContext(r)
 		strava.OAuthCallbackURL = fmt.Sprintf("http://localhost:%d/auth/", PORT)
 		path, err := strava.OAuthCallbackPath()
 		if err != nil {
-			fmt.Printf("Can't set authorization callback URL.\n%s\n", err)
+			c.Infof("Can't set authorization callback URL.\n%s\n", err)
 			os.Exit(1)
 		}
 		http.HandleFunc(path, strava.OAuthCallbackHandler(authSuccess, authFailure))
@@ -122,7 +117,7 @@ func checkAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func authSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *http.Request) {
-	client = strava.NewClient(auth.AccessToken)
+	accessToken = auth.AccessToken
 	athlete = auth.Athlete
 	http.Redirect(w, r, "/", http.StatusFound)
 }
