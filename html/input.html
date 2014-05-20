@@ -3,12 +3,15 @@
     <head>
     </head>
     <body>
+    <h1>Hello {{.FirstName}} {{.LastName}}!</h1>
         <div>
-            Enter the ID of the activity you want to view.  Leave blank to view your last activity.
+            Enter the ID of the activity you want to view or leave blank to view your last activity.
         </div>
         <form action="/results/" method="GET">
             <div><input type="text" name="activity_id">Activity ID</input></div>
             <div><input type="submit" value="Go"></div>
         </form>
+
+        <div>Note: this could take a few seconds...</div>
     </body>
 </html>
