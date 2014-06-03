@@ -5,10 +5,10 @@ import (
 	"appengine/urlfetch"
 	"encoding/json"
 	"fmt"
-	"github.com/Ferguzz/go.strava"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
+	"github.com/strava/go.strava"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -17,6 +17,7 @@ import (
 	"time"
 )
 
+var authenticator *strava.OAuthAuthenticator
 var store = sessions.NewCookieStore(securecookie.GenerateRandomKey(64))
 var sessionName = "prchecker"
 var templates = template.Must(template.ParseFiles("html/input.html", "html/results.html"))
@@ -50,14 +51,20 @@ func init() {
 	strava.ClientId = config.ClientID
 	strava.ClientSecret = config.ClientSecret
 
-	strava.OAuthCallbackURL = fmt.Sprintf("%s/auth/", config.Domain)
-	path, err := strava.OAuthCallbackPath()
+	authenticator = &strava.OAuthAuthenticator{
+		CallbackURL: fmt.Sprintf("%s/auth/", config.Domain),
+		RequestClientGenerator: func(r *http.Request) *http.Client {
+			return urlfetch.Client(appengine.NewContext(r))
+		},
+	}
+
+	path, err := authenticator.CallbackPath()
 	if err != nil {
 		log.Fatal("Can't set authorization callback URL: %s\n", err)
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc(path, strava.OAuthCallbackHandler(authSuccess, authFailure))
+	r.HandleFunc(path, authenticator.HandlerFunc(authSuccess, authFailure))
 	r.HandleFunc("/", homeHandler)
 	r.HandleFunc("/results/", resultsHandler)
 	http.Handle("/", r)
@@ -134,7 +141,7 @@ func checkAuth(session *sessions.Session) bool {
 }
 
 func authHandler(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, strava.OAuthAuthorizationURL("prchecker", strava.Permissions.Public, false), http.StatusFound)
+	http.Redirect(w, r, authenticator.AuthorizationURL("prchecker", strava.Permissions.Public, false), http.StatusFound)
 }
 
 func authSuccess(auth *strava.AuthorizationResponse, w http.ResponseWriter, r *http.Request) {
